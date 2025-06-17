@@ -157,12 +157,9 @@ for directory in [DOWNLOAD_DIR, TMP_DIR]:
 # Configure CORS
 CORS(app, resources={
     r"/*": {
-        "origins": "*",
-        "methods": ["GET", "POST", "OPTIONS", "HEAD"],
-        "allow_headers": ["Content-Type", "Authorization", "Access-Control-Allow-Origin",
-                         "Access-Control-Allow-Headers", "Origin", "Accept", "X-Requested-With"],
-        "expose_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True,
+        "origins": ["https://clip-frontend-three.vercel.app"],  # Explicitly allow your frontend
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
         "max_age": 3600
     }
 })
