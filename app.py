@@ -1088,6 +1088,7 @@ def download_via_rapidapi(video_id, input_path):
         return False
 
 def download_via_ytdlp(video_id, input_path, use_cookies=True):
+    """Download video using yt-dlp with enhanced options and proxy support"""
     ydl_opts = {
         'format': 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/mp4/best[height<=720]',
         'outtmpl': input_path,
@@ -1110,20 +1111,18 @@ def download_via_ytdlp(video_id, input_path, use_cookies=True):
         'referer': 'https://www.youtube.com/',
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Referer': 'https://www.youtube.com/',
-            'Origin': 'https://www.youtube.com'
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
         },
+        # Add proxy support
         'proxy': get_random_proxy()
     }
+    print(f"Using proxy for yt-dlp: {ydl_opts['proxy']}")
 
-    if use_cookies and validate_cookies_file(COOKIES_FILE):
+    # Use cookies if available and valid
+    if use_cookies and os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 100:
         ydl_opts['cookiefile'] = COOKIES_FILE
         print("Using cookies for yt-dlp download")
-    elif use_cookies:
-        ydl_opts['cookiesfrombrowser'] = ('chrome', None, None)
-        print("Cookies file invalid, using browser cookies")
 
     try:
         os.makedirs(os.path.dirname(input_path), exist_ok=True)
@@ -1144,46 +1143,67 @@ def download_via_ytdlp(video_id, input_path, use_cookies=True):
         else:
             raise last_error or Exception("All URL formats failed")
 
-        if not os.path.exists(input_path) or os.path.getsize(input_path) < 1024:
-            raise Exception("Downloaded file is invalid or empty")
+        if not os.path.exists(input_path):
+            raise Exception("Downloaded file not found")
+        if os.path.getsize(input_path) < 1024:
+            raise Exception("Downloaded file is too small or empty")
         return True
     except Exception as e:
         print(f"yt-dlp download failed: {str(e)}")
         if os.path.exists(input_path):
-            os.remove(input_path)
+            try:
+                os.remove(input_path)
+            except:
+                pass
         return False
 
+
 def download_via_pytube(video_id, input_path):
+    """Download video using pytube with enhanced options"""
     try:
+        # Create YouTube object
         yt = YouTube(f'https://www.youtube.com/watch?v={video_id}')
-        stream = yt.streams.filter(file_extension='mp4', progressive=True).order_by('resolution').desc().first()
+        
+        # Get the highest resolution stream (up to 720p)
+        stream = yt.streams.filter(
+            file_extension='mp4',
+            progressive=True,
+            resolution='720p'
+        ).order_by('resolution').desc().first()
+        
+        # If no 720p stream, get the highest available
         if not stream:
-            print("No progressive streams found, trying adaptive streams")
-            stream = yt.streams.filter(file_extension='mp4').order_by('resolution').desc().first()
+            stream = yt.streams.filter(
+                file_extension='mp4',
+                progressive=True
+            ).order_by('resolution').desc().first()
+        
         if not stream:
             raise Exception("No suitable video stream found")
-
+        
         print(f"Downloading video {video_id} with resolution: {stream.resolution}")
+        
+        # Ensure download directory exists
         os.makedirs(os.path.dirname(input_path), exist_ok=True)
-
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                stream.download(output_path=os.path.dirname(input_path), filename=os.path.basename(input_path))
-                break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    sleep(5)
-                    continue
-                raise e
-
+        
+        # Download the video
+        stream.download(
+            output_path=os.path.dirname(input_path),
+            filename=os.path.basename(input_path))
+        
+        # Verify download
         if not os.path.exists(input_path) or os.path.getsize(input_path) < 1024:
-            raise Exception("Downloaded file is invalid or empty")
+            raise Exception("Downloaded file is too small or empty")
+            
         return True
     except Exception as e:
         print(f"pytube download failed: {str(e)}")
+        # Clean up any partial files
         if os.path.exists(input_path):
-            os.remove(input_path)
+            try:
+                os.remove(input_path)
+            except:
+                pass
         return False
 
 def download_video(video_id, input_path):
