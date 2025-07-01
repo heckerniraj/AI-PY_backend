@@ -23,8 +23,13 @@ import yt_dlp
 import traceback
 from pytube import YouTube  
 import random
+import logging
 
 load_dotenv()
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -50,6 +55,10 @@ VALID_COOKIE_HEADERS = [
     '# HTTP Cookie File',
     '# Netscape HTTP Cookie File'
 ]
+
+
+
+
 
 def validate_cookies_file(cookies_path):
     """Validate the cookies file format and size"""
@@ -261,6 +270,7 @@ def get_transcript(video_id):
                 'status': False
             }), 400
 
+        logger.info(f"Starting transcript fetch for video_id: {video_id}")
 
         # Fetch transcript
         transcript_list = None
@@ -273,14 +283,12 @@ def get_transcript(video_id):
                     proxy_password=WEBSHARE_PASSWORD,
                 )
             )
-
-            transcript_list = ytt_api.fetch(
-                video_id,
-                languages=['en']
-            )
+            transcript_list = ytt_api.fetch(video_id, languages=['en'])
+            logger.info(f"Successfully fetched transcript with {len(transcript_list)} segments")
         except Exception as e:
             transcript_error = str(e)
-
+            logger.error(f"Error fetching transcript: {transcript_error}")
+            logger.warning(f"Retrying transcript fetch due to error: {transcript_error}")
             try:
                 ytt_api = YouTubeTranscriptApi(
                     proxy_config=WebshareProxyConfig(
@@ -288,11 +296,10 @@ def get_transcript(video_id):
                         proxy_password=WEBSHARE_PASSWORD,
                     )
                 )
-                transcript_list = ytt_api.fetch(
-                    video_id,
-                    languages=['en']
-                )
+                transcript_list = ytt_api.fetch(video_id, languages=['en'])
+                logger.info(f"Successfully fetched transcript with {len(transcript_list)} segments after retry")
             except Exception as fallback_err:
+                logger.error(f"Failed to fetch transcript after retry: {str(fallback_err)}")
                 return jsonify({
                     'message': "No transcript available for this video. The video might not have captions enabled.",
                     'originalError': transcript_error,
@@ -301,6 +308,7 @@ def get_transcript(video_id):
                 }), 404
 
         if not transcript_list:
+            logger.error("No transcript segments found for this video")
             return jsonify({
                 'message': "No transcript segments found for this video. The video might not have captions.",
                 'status': False
@@ -309,7 +317,6 @@ def get_transcript(video_id):
         processed_transcript = []
         for index, item in enumerate(transcript_list):
             try:
-                # Access attributes directly from the FetchedTranscriptSnippet object
                 text = getattr(item, 'text', None)
                 start = getattr(item, 'start', None)
                 duration = getattr(item, 'duration', None)
@@ -328,11 +335,13 @@ def get_transcript(video_id):
                 continue
 
         if not processed_transcript:
+            logger.error("Failed to process transcript segments")
             return jsonify({
                 'message': "Failed to process transcript segments. The transcript may be malformed.",
                 'status': False
             }), 404
 
+        logger.info(f"Processed {len(processed_transcript)} segments")
         return jsonify({
             'message': "Transcript fetched successfully",
             'data': processed_transcript,
@@ -346,6 +355,7 @@ def get_transcript(video_id):
         }), 200
 
     except Exception as error:
+        logger.error(f"Unexpected error: {str(error)}")
         return jsonify({
             'message': "Failed to fetch transcript",
             'error': str(error),
