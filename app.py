@@ -265,143 +265,67 @@ def get_data(video_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/transcript/<video_id>', methods=['GET', 'POST'])
-def get_transcript(video_id):
-    """
-    Fetch the transcript for a given YouTube video ID using the scrapingdog API.
-    
-    Args:
-        video_id (str): The YouTube video ID passed in the URL.
-    
-    Returns:
-        JSON response with the transcript data or an error message.
-    """
-    if not video_id:
-        return jsonify({
-            'message': "Video ID is required",
-            'status': False
-        }), 400
-
-    logger.info(f"Fetching transcript for video_id: {video_id} using scrapingdog API")
-
-    api_key = "6865405067725052ca756102"  # TODO: Replace with os.getenv('SCRAPINGDOG_API_KEY')
-    url = "https://api.scrapingdog.com/youtube/transcripts/"
-    params = {
-        "api_key": api_key,
-        "v": video_id
-    }
-
+def fetch_transcript(video_id):
     try:
+        # Example API call (adjust URL and params as per ScrapingDog API)
+        url = "https://api.scrapingdog.com/transcript"  # Hypothetical endpoint
+        params = {'video_id': video_id, 'api_key': '6865405067725052ca756102'}
         response = requests.get(url, params=params)
-        response.raise_for_status()
+        response.raise_for_status()  # Raises an HTTPError for bad responses
         data = response.json()
 
-        # Log the structure for debugging
         logger.info(f"API response type: {type(data)}")
-        if isinstance(data, list) and data:
-            logger.info(f"First item type: {type(data[0])}")
 
-        processed_transcript = []
-
-        # Handle different data structures
-        if isinstance(data, list):
-            if data and isinstance(data[0], str):
-                # List of strings: each string is a transcript line
-                for index, text in enumerate(data):
-                    if text.strip():
-                        segment = {
-                            'id': index + 1,
-                            'text': text.strip(),
-                            'startTime': None,
-                            'endTime': None,
-                            'duration': None
-                        }
-                        processed_transcript.append(segment)
-            elif data and isinstance(data[0], dict):
-                # List of dictionaries: extract text, start, duration
-                for index, item in enumerate(data):
-                    text = item.get('text') or item.get('line') or item.get('caption', '')
-                    start = item.get('start')
-                    duration = item.get('duration')
-                    if text and start is not None and duration is not None:
-                        try:
-                            start = float(start)
-                            duration = float(duration)
-                            segment = {
-                                'id': index + 1,
-                                'text': text.strip(),
-                                'startTime': start,
-                                'endTime': start + duration,
-                                'duration': duration
-                            }
-                            if segment['text']:
+        # Check if the response is a dictionary
+        if isinstance(data, dict):
+            # Safely check for the 'transcripts' key
+            if 'transcripts' in data:
+                transcripts = data['transcripts']
+                if isinstance(transcripts, list):
+                    processed_transcript = []
+                    for item in transcripts:
+                        if isinstance(item, dict):
+                            text = item.get('text')
+                            start = item.get('start')
+                            duration = item.get('duration')
+                            if text and start is not None and duration is not None:
+                                segment = {
+                                    'text': text.strip(),
+                                    'startTime': float(start),
+                                    'duration': float(duration)
+                                }
                                 processed_transcript.append(segment)
-                        except ValueError:
-                            # Skip if start/duration can't be converted to float
-                            continue
-                    elif text:
-                        # Text only, no timestamps
-                        segment = {
-                            'id': index + 1,
-                            'text': text.strip(),
-                            'startTime': None,
-                            'endTime': None,
-                            'duration': None
-                        }
-                        if segment['text']:
-                            processed_transcript.append(segment)
+                    if processed_transcript:
+                        return jsonify({
+                            'message': "Transcript fetched successfully",
+                            'data': processed_transcript,
+                            'status': True,
+                            'totalSegments': len(processed_transcript)
+                        }), 200
+                    else:
+                        logger.error("No valid transcript segments found")
+                        return jsonify({'message': "No valid transcript segments found", 'status': False}), 404
+                else:
+                    logger.error(f"Transcripts is not a list, got {type(transcripts)}")
+                    return jsonify({'message': "Invalid transcript format", 'status': False}), 400
+            elif 'error' in data:
+                # Handle API error responses
+                logger.error(f"API error: {data['error']}")
+                return jsonify({'message': data['error'], 'status': False}), 404
             else:
-                raise ValueError("Unexpected list content: empty or unrecognized item type")
-        elif isinstance(data, str):
-            # Single string: split into lines
-            lines = data.split('\n')
-            for index, line in enumerate(lines):
-                if line.strip():
-                    segment = {
-                        'id': index + 1,
-                        'text': line.strip(),
-                        'startTime': None,
-                        'endTime': None,
-                        'duration': None
-                    }
-                    processed_transcript.append(segment)
+                # No 'transcripts' key found
+                logger.error("No 'transcripts' key in response")
+                return jsonify({'message': "No transcript data found", 'status': False}), 404
         else:
-            raise ValueError(f"Unexpected API response format: {type(data)}")
-
-        if not processed_transcript:
-            logger.error("No valid transcript segments found")
-            return jsonify({
-                'message': "No valid transcript segments found",
-                'status': False
-            }), 404
-
-        timestamps_available = any(segment['startTime'] is not None for segment in processed_transcript)
-        logger.info(f"Processed {len(processed_transcript)} segments")
-        return jsonify({
-            'message': "Transcript fetched successfully",
-            'data': processed_transcript,
-            'status': True,
-            'totalSegments': len(processed_transcript),
-            'metadata': {
-                'videoId': video_id,
-                'language': 'en',
-                'isAutoGenerated': True,
-                'timestampsAvailable': timestamps_available
-            }
-        }), 200
+            logger.error(f"API response is not a dictionary, got {type(data)}")
+            return jsonify({'message': "Unexpected API response format", 'status': False}), 500
 
     except requests.exceptions.HTTPError as e:
         logger.error(f"HTTP error: {str(e)}")
-        return jsonify({
-            'message': f"Failed to fetch transcript: {str(e)}",
-            'status': False
-        }), e.response.status_code
-
+        return jsonify({'message': str(e), 'status': False}), e.response.status_code
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
-        return jsonify({
-            'message': f"An unexpected error occurred: {str(e)}",
-            'status': False
-        }), 500
+        return jsonify({'message': "An unexpected error occurred", 'status': False}), 500
 
 @app.route('/upload-cookies', methods=['POST'])
 def upload_cookies():
