@@ -303,32 +303,23 @@ def get_transcript(video_id):
                 'status': False
             }), 500
 
-        # Process the JSON data (assuming it's a list or string)
+        # Process the JSON data based on the expected format with 'transcripts' key
         processed_transcript = []
-        if isinstance(data, list):
-            for index, item in enumerate(data):
-                text = item if isinstance(item, str) else item.get('text', '')
-                if text.strip():
+        if isinstance(data, dict) and 'transcripts' in data:
+            for index, item in enumerate(data['transcripts']):
+                if isinstance(item, dict) and 'text' in item:
                     segment = {
                         'id': index + 1,
-                        'text': text.strip(),
-                        'startTime': None,
-                        'endTime': None,
-                        'duration': None
+                        'text': item.get('text', '').strip(),
+                        'startTime': item.get('start', None),
+                        'endTime': None,  # Calculate endTime if needed
+                        'duration': item.get('duration', None)
                     }
-                    processed_transcript.append(segment)
-        elif isinstance(data, str):
-            lines = data.split('\n')
-            for index, line in enumerate(lines):
-                if line.strip():
-                    segment = {
-                        'id': index + 1,
-                        'text': line.strip(),
-                        'startTime': None,
-                        'endTime': None,
-                        'duration': None
-                    }
-                    processed_transcript.append(segment)
+                    # Optionally calculate endTime if start and duration are provided
+                    if segment['startTime'] is not None and segment['duration'] is not None:
+                        segment['endTime'] = segment['startTime'] + segment['duration']
+                    if segment['text']:
+                        processed_transcript.append(segment)
         else:
             logger.error(f"Unexpected API response format: {type(data)}")
             return jsonify({
@@ -364,7 +355,7 @@ def get_transcript(video_id):
             'message': "An unexpected error occurred while fetching the transcript",
             'status': False
         }), 500
-
+        
 @app.route('/upload-cookies', methods=['POST'])
 def upload_cookies():
     """
