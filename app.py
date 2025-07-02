@@ -26,6 +26,8 @@ from pytube import YouTube
 import random
 import logging
 
+
+
 load_dotenv()
 
 
@@ -264,68 +266,46 @@ def get_data(video_id):
 
 @app.route('/transcript/<video_id>', methods=['GET', 'POST'])
 def get_transcript(video_id):
+    """
+    Fetch the transcript for a given YouTube video ID using the scrapingdog API.
+    
+    Args:
+        video_id (str): The YouTube video ID passed in the URL.
+    
+    Returns:
+        JSON response with the transcript data or an error message.
+    """
+    # Validate video_id
+    if not video_id:
+        return jsonify({
+            'message': "Video ID is required",
+            'status': False
+        }), 400
+
+    logger.info(f"Fetching transcript for video_id: {video_id} using scrapingdog API")
+
+    # API configuration
+    api_key = "6865405067725052ca756102"  # TODO: Replace with os.getenv('SCRAPINGDOG_API_KEY') for security
+    url = "https://api.scrapingdog.com/youtube/transcripts/"
+    params = {
+        "api_key": api_key,
+        "v": video_id
+    }
+
     try:
-        if not video_id:
-            return jsonify({
-                'message': "Video ID is required",
-                'status': False
-            }), 400
+        # Make the API request
+        response = requests.get(url, params=params)
+        response.raise_for_status()  # Raises an exception for 4xx/5xx status codes
+        data = response.json()
 
-        logger.info(f"Starting transcript fetch for video_id: {video_id}")
-
-        # Fetch transcript
-        transcript_list = None
-
-        try:
-            # Attempt to fetch transcript with proxy
-            proxy_config = WebshareProxyConfig(
-                proxy_username=os.getenv('WEBSHARE_USERNAME', 'pzvokxqt'),
-                proxy_password=os.getenv('WEBSHARE_PASSWORD', 'v17333r03zxw')
-            )
-            ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
-            transcript_list = ytt_api.get_transcript(video_id, languages=['en'])
-            logger.info(f"Successfully fetched transcript with proxy: {len(transcript_list)} segments")
-        except (TranscriptsDisabled, NoTranscriptFound) as e:
-            # Transcript is unavailable, no need to try fallback
-            logger.error(f"Transcript unavailable with proxy: {str(e)}")
-            return jsonify({
-                'message': "No transcript available for this video. The video might not have captions enabled.",
-                'error': str(e),
-                'status': False
-            }), 404
-        except Exception as e:
-            # Proxy failed, log error and attempt without proxy
-            logger.error(f"Proxy error: {str(e)}")
-            try:
-                # Fallback: Fetch transcript without proxy
-                ytt_api_no_proxy = YouTubeTranscriptApi()
-                transcript_list = ytt_api_no_proxy.get_transcript(video_id, languages=['en'])
-                logger.info(f"Successfully fetched transcript without proxy: {len(transcript_list)} segments")
-            except (TranscriptsDisabled, NoTranscriptFound) as e:
-                # Transcript is still unavailable
-                logger.error(f"Transcript unavailable without proxy: {str(e)}")
-                return jsonify({
-                    'message': "No transcript available for this video. The video might not have captions enabled.",
-                    'error': str(e),
-                    'status': False
-                }), 404
-            except Exception as e:
-                # Fallback failed for another reason
-                logger.error(f"Fallback error: {str(e)}")
-                return jsonify({
-                    'message': "Failed to fetch transcript even without proxy",
-                    'error': str(e),
-                    'status': False
-                }), 500
-
-        # Process the transcript if fetched successfully
+        # Process the transcript assuming data is a list of segments
         processed_transcript = []
-        for index, item in enumerate(transcript_list):
+        for index, item in enumerate(data):
             try:
                 text = item.get('text')
                 start = item.get('start')
                 duration = item.get('duration')
-                if text is not None and start is not None and duration is not None:
+                if all(x is not None for x in [text, start, duration]):
                     segment = {
                         'id': index + 1,
                         'text': text.strip(),
@@ -333,11 +313,13 @@ def get_transcript(video_id):
                         'endTime': float(start + duration),
                         'duration': float(duration)
                     }
-                    if segment['text']:
+                    if segment['text']:  # Ensure text is not empty after stripping
                         processed_transcript.append(segment)
-            except Exception:
+            except (TypeError, ValueError):
+                # Skip malformed segments
                 continue
 
+        # Check if any valid segments were processed
         if not processed_transcript:
             logger.error("Failed to process transcript segments")
             return jsonify({
@@ -345,6 +327,7 @@ def get_transcript(video_id):
                 'status': False
             }), 404
 
+        # Success response
         logger.info(f"Processed {len(processed_transcript)} segments")
         return jsonify({
             'message': "Transcript fetched successfully",
@@ -353,16 +336,32 @@ def get_transcript(video_id):
             'totalSegments': len(processed_transcript),
             'metadata': {
                 'videoId': video_id,
-                'language': 'en',
-                'isAutoGenerated': True
+                'language': 'en',  # Assuming English; adjust if API provides language info
+                'isAutoGenerated': True  # Assuming auto-generated; adjust if API specifies
             }
         }), 200
 
-    except Exception as error:
-        logger.error(f"Unexpected error: {str(error)}")
+    except requests.exceptions.HTTPError as e:
+        # Handle HTTP errors (e.g., 404, 403, 500 from API)
+        logger.error(f"HTTP error fetching transcript: {str(e)}")
         return jsonify({
-            'message': "Failed to fetch transcript",
-            'error': str(error),
+            'message': f"Failed to fetch transcript: {str(e)}",
+            'status': False
+        }), e.response.status_code
+
+    except requests.exceptions.RequestException as e:
+        # Handle network-related errors
+        logger.error(f"Network error fetching transcript: {str(e)}")
+        return jsonify({
+            'message': "Failed to fetch transcript due to a network error",
+            'status': False
+        }), 500
+
+    except Exception as e:
+        # Handle unexpected errors
+        logger.error(f"Unexpected error: {str(e)}")
+        return jsonify({
+            'message': "An unexpected error occurred while fetching the transcript",
             'status': False
         }), 500
 
