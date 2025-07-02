@@ -275,48 +275,56 @@ def get_transcript(video_id):
 
         # Fetch transcript
         transcript_list = None
-        transcript_error = None
 
         try:
-            # Configure WebshareProxyConfig with only username and password
+            # Attempt to fetch transcript with proxy
             proxy_config = WebshareProxyConfig(
                 proxy_username=os.getenv('WEBSHARE_USERNAME', 'pzvokxqt'),
                 proxy_password=os.getenv('WEBSHARE_PASSWORD', 'v17333r03zxw')
             )
             ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
             transcript_list = ytt_api.get_transcript(video_id, languages=['en'])
-            logger.info(f"Successfully fetched transcript with {len(transcript_list)} segments")
+            logger.info(f"Successfully fetched transcript with proxy: {len(transcript_list)} segments")
         except (TranscriptsDisabled, NoTranscriptFound) as e:
-            transcript_error = str(e)
-            logger.error(f"Transcript unavailable: {transcript_error}")
+            # Transcript is unavailable, no need to try fallback
+            logger.error(f"Transcript unavailable with proxy: {str(e)}")
             return jsonify({
                 'message': "No transcript available for this video. The video might not have captions enabled.",
-                'error': transcript_error,
+                'error': str(e),
                 'status': False
             }), 404
         except Exception as e:
-            transcript_error = str(e)
-            logger.error(f"Error fetching transcript: {transcript_error}")
-            return jsonify({
-                'message': "Failed to fetch transcript due to proxy issues.",
-                'originalError': transcript_error,
-                'status': False
-            }), 503
+            # Proxy failed, log error and attempt without proxy
+            logger.error(f"Proxy error: {str(e)}")
+            try:
+                # Fallback: Fetch transcript without proxy
+                ytt_api_no_proxy = YouTubeTranscriptApi()
+                transcript_list = ytt_api_no_proxy.get_transcript(video_id, languages=['en'])
+                logger.info(f"Successfully fetched transcript without proxy: {len(transcript_list)} segments")
+            except (TranscriptsDisabled, NoTranscriptFound) as e:
+                # Transcript is still unavailable
+                logger.error(f"Transcript unavailable without proxy: {str(e)}")
+                return jsonify({
+                    'message': "No transcript available for this video. The video might not have captions enabled.",
+                    'error': str(e),
+                    'status': False
+                }), 404
+            except Exception as e:
+                # Fallback failed for another reason
+                logger.error(f"Fallback error: {str(e)}")
+                return jsonify({
+                    'message': "Failed to fetch transcript even without proxy",
+                    'error': str(e),
+                    'status': False
+                }), 500
 
-        if not transcript_list:
-            logger.error("No transcript segments found for this video")
-            return jsonify({
-                'message': "No transcript segments found for this video. The video might not have captions.",
-                'status': False
-            }), 404
-
+        # Process the transcript if fetched successfully
         processed_transcript = []
         for index, item in enumerate(transcript_list):
             try:
                 text = item.get('text')
                 start = item.get('start')
                 duration = item.get('duration')
-
                 if text is not None and start is not None and duration is not None:
                     segment = {
                         'id': index + 1,
