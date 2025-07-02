@@ -275,37 +275,33 @@ def get_transcript(video_id):
         # Fetch transcript
         transcript_list = None
         transcript_error = None
+        max_retries = 3
+        retry_count = 0
 
-        try:
-            ytt_api = YouTubeTranscriptApi(
-                proxy_config=WebshareProxyConfig(
-                    proxy_username=WEBSHARE_USERNAME,
-                    proxy_password=WEBSHARE_PASSWORD,
-                )
-            )
-            transcript_list = ytt_api.fetch(video_id, languages=['en'])
-            logger.info(f"Successfully fetched transcript with {len(transcript_list)} segments")
-        except Exception as e:
-            transcript_error = str(e)
-            logger.error(f"Error fetching transcript: {transcript_error}")
-            logger.warning(f"Retrying transcript fetch due to error: {transcript_error}")
+        while retry_count < max_retries:
+            proxy = get_random_proxy()
+            logger.info(f"Attempt {retry_count + 1}/{max_retries} using proxy: {proxy}")
+
             try:
-                ytt_api = YouTubeTranscriptApi(
-                    proxy_config=WebshareProxyConfig(
-                        proxy_username=WEBSHARE_USERNAME,
-                        proxy_password=WEBSHARE_PASSWORD,
-                    )
-                )
-                transcript_list = ytt_api.fetch(video_id, languages=['en'])
-                logger.info(f"Successfully fetched transcript with {len(transcript_list)} segments after retry")
-            except Exception as fallback_err:
-                logger.error(f"Failed to fetch transcript after retry: {str(fallback_err)}")
-                return jsonify({
-                    'message': "No transcript available for this video. The video might not have captions enabled.",
-                    'originalError': transcript_error,
-                    'fallbackError': str(fallback_err),
-                    'status': False
-                }), 404
+                proxies = {'http': proxy, 'https': proxy}
+                ytt_api = YouTubeTranscriptApi(proxies=proxies)
+                transcript_list = ytt_api.get_transcript(video_id, languages=['en'])
+                logger.info(f"Successfully fetched transcript with {len(transcript_list)} segments")
+                break
+            except Exception as e:
+                transcript_error = str(e)
+                logger.error(f"Error fetching transcript with proxy {proxy}: {transcript_error}")
+                retry_count += 1
+                if retry_count < max_retries:
+                    logger.warning(f"Retrying with a new proxy due to error: {transcript_error}")
+                    time.sleep(2 ** retry_count)  # Exponential backoff: 2s, 4s, 8s
+                else:
+                    logger.error(f"Failed to fetch transcript after {max_retries} retries")
+                    return jsonify({
+                        'message': "No transcript available for this video due to proxy issues.",
+                        'originalError': transcript_error,
+                        'status': False
+                    }), 503  # Use 503 Service Unavailable for proxy-related failures
 
         if not transcript_list:
             logger.error("No transcript segments found for this video")
@@ -317,9 +313,9 @@ def get_transcript(video_id):
         processed_transcript = []
         for index, item in enumerate(transcript_list):
             try:
-                text = getattr(item, 'text', None)
-                start = getattr(item, 'start', None)
-                duration = getattr(item, 'duration', None)
+                text = item.get('text')
+                start = item.get('start')
+                duration = item.get('duration')
 
                 if text is not None and start is not None and duration is not None:
                     segment = {
@@ -337,7 +333,7 @@ def get_transcript(video_id):
         if not processed_transcript:
             logger.error("Failed to process transcript segments")
             return jsonify({
-                'message': "Failed to process transcript segments. The transcript may be malformed.",
+                'message': "Failed to process transcript segments. The video may not have valid captions.",
                 'status': False
             }), 404
 
