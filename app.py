@@ -275,7 +275,6 @@ def get_transcript(video_id):
     Returns:
         JSON response with the transcript data or an error message.
     """
-    # Validate video_id
     if not video_id:
         return jsonify({
             'message': "Video ID is required",
@@ -284,8 +283,7 @@ def get_transcript(video_id):
 
     logger.info(f"Fetching transcript for video_id: {video_id} using scrapingdog API")
 
-    # API configuration
-    api_key = "6865405067725052ca756102"  # TODO: Replace with os.getenv('SCRAPINGDOG_API_KEY') for security
+    api_key = "6865405067725052ca756102"  # TODO: Replace with os.getenv('SCRAPINGDOG_API_KEY')
     url = "https://api.scrapingdog.com/youtube/transcripts/"
     params = {
         "api_key": api_key,
@@ -293,41 +291,90 @@ def get_transcript(video_id):
     }
 
     try:
-        # Make the API request
         response = requests.get(url, params=params)
-        response.raise_for_status()  # Raises an exception for 4xx/5xx status codes
+        response.raise_for_status()
         data = response.json()
 
-        # Process the transcript assuming data is a list of segments
+        # Log the structure for debugging
+        logger.info(f"API response type: {type(data)}")
+        if isinstance(data, list) and data:
+            logger.info(f"First item type: {type(data[0])}")
+
         processed_transcript = []
-        for index, item in enumerate(data):
-            try:
-                text = item.get('text')
-                start = item.get('start')
-                duration = item.get('duration')
-                if all(x is not None for x in [text, start, duration]):
+
+        # Handle different data structures
+        if isinstance(data, list):
+            if data and isinstance(data[0], str):
+                # List of strings: each string is a transcript line
+                for index, text in enumerate(data):
+                    if text.strip():
+                        segment = {
+                            'id': index + 1,
+                            'text': text.strip(),
+                            'startTime': None,
+                            'endTime': None,
+                            'duration': None
+                        }
+                        processed_transcript.append(segment)
+            elif data and isinstance(data[0], dict):
+                # List of dictionaries: extract text, start, duration
+                for index, item in enumerate(data):
+                    text = item.get('text') or item.get('line') or item.get('caption', '')
+                    start = item.get('start')
+                    duration = item.get('duration')
+                    if text and start is not None and duration is not None:
+                        try:
+                            start = float(start)
+                            duration = float(duration)
+                            segment = {
+                                'id': index + 1,
+                                'text': text.strip(),
+                                'startTime': start,
+                                'endTime': start + duration,
+                                'duration': duration
+                            }
+                            if segment['text']:
+                                processed_transcript.append(segment)
+                        except ValueError:
+                            # Skip if start/duration can't be converted to float
+                            continue
+                    elif text:
+                        # Text only, no timestamps
+                        segment = {
+                            'id': index + 1,
+                            'text': text.strip(),
+                            'startTime': None,
+                            'endTime': None,
+                            'duration': None
+                        }
+                        if segment['text']:
+                            processed_transcript.append(segment)
+            else:
+                raise ValueError("Unexpected list content: empty or unrecognized item type")
+        elif isinstance(data, str):
+            # Single string: split into lines
+            lines = data.split('\n')
+            for index, line in enumerate(lines):
+                if line.strip():
                     segment = {
                         'id': index + 1,
-                        'text': text.strip(),
-                        'startTime': float(start),
-                        'endTime': float(start + duration),
-                        'duration': float(duration)
+                        'text': line.strip(),
+                        'startTime': None,
+                        'endTime': None,
+                        'duration': None
                     }
-                    if segment['text']:  # Ensure text is not empty after stripping
-                        processed_transcript.append(segment)
-            except (TypeError, ValueError):
-                # Skip malformed segments
-                continue
+                    processed_transcript.append(segment)
+        else:
+            raise ValueError(f"Unexpected API response format: {type(data)}")
 
-        # Check if any valid segments were processed
         if not processed_transcript:
-            logger.error("Failed to process transcript segments")
+            logger.error("No valid transcript segments found")
             return jsonify({
-                'message': "Failed to process transcript segments. The video may not have valid captions.",
+                'message': "No valid transcript segments found",
                 'status': False
             }), 404
 
-        # Success response
+        timestamps_available = any(segment['startTime'] is not None for segment in processed_transcript)
         logger.info(f"Processed {len(processed_transcript)} segments")
         return jsonify({
             'message': "Transcript fetched successfully",
@@ -336,32 +383,23 @@ def get_transcript(video_id):
             'totalSegments': len(processed_transcript),
             'metadata': {
                 'videoId': video_id,
-                'language': 'en',  # Assuming English; adjust if API provides language info
-                'isAutoGenerated': True  # Assuming auto-generated; adjust if API specifies
+                'language': 'en',
+                'isAutoGenerated': True,
+                'timestampsAvailable': timestamps_available
             }
         }), 200
 
     except requests.exceptions.HTTPError as e:
-        # Handle HTTP errors (e.g., 404, 403, 500 from API)
-        logger.error(f"HTTP error fetching transcript: {str(e)}")
+        logger.error(f"HTTP error: {str(e)}")
         return jsonify({
             'message': f"Failed to fetch transcript: {str(e)}",
             'status': False
         }), e.response.status_code
 
-    except requests.exceptions.RequestException as e:
-        # Handle network-related errors
-        logger.error(f"Network error fetching transcript: {str(e)}")
-        return jsonify({
-            'message': "Failed to fetch transcript due to a network error",
-            'status': False
-        }), 500
-
     except Exception as e:
-        # Handle unexpected errors
         logger.error(f"Unexpected error: {str(e)}")
         return jsonify({
-            'message': "An unexpected error occurred while fetching the transcript",
+            'message': f"An unexpected error occurred: {str(e)}",
             'status': False
         }), 500
 
