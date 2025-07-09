@@ -264,15 +264,29 @@ def get_data(video_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
-@app.route('/url/transcript', methods=['GET'])
+@app.route('/url/transcript', methods=['GET', 'POST'])
 def get_transcript_by_url():
-    # Get the video URL from query parameters
-    video_url = request.args.get('url')
-    if not video_url:
-        return jsonify({
-            'message': "Video URL is required",
-            'status': False
-        }), 400
+    # Determine video_url based on request method
+    if request.method == 'GET':
+        video_url = request.args.get('url')
+        if not video_url:
+            return jsonify({
+                'message': "Video URL is required in query parameters",
+                'status': False
+            }), 400
+    elif request.method == 'POST':
+        if not request.is_json:
+            return jsonify({
+                'message': "Request must be JSON",
+                'status': False
+            }), 400
+        data = request.get_json()
+        video_url = data.get('video_url') if data else None
+        if not video_url:
+            return jsonify({
+                'message': "Video URL is required in request body",
+                'status': False
+            }), 400
 
     logger.info(f"Fetching transcript for video_url: {video_url} using Video Transcript API")
 
