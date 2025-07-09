@@ -265,7 +265,7 @@ def get_data(video_id):
         return jsonify({"error": str(e)}), 500
     
 @app.route('/url/transcript', methods=['GET'])
-def get_transcript():
+def get_transcript_by_url():
     # Get the video URL from query parameters
     video_url = request.args.get('url')
     if not video_url:
