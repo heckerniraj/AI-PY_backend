@@ -263,6 +263,99 @@ def get_data(video_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+@app.route('/transcript', methods=['GET'])
+def get_transcript():
+    # Get the video URL from query parameters
+    video_url = request.args.get('url')
+    if not video_url:
+        return jsonify({
+            'message': "Video URL is required",
+            'status': False
+        }), 400
+
+    logger.info(f"Fetching transcript for video_url: {video_url} using Video Transcript API")
+
+    # Retrieve RapidAPI key from environment variables
+    rapidapi_key = os.getenv('RAPIDAPI_KEY')
+    if not rapidapi_key:
+        return jsonify({
+            'message': "RapidAPI key is not configured",
+            'status': False
+        }), 500
+
+    # Define the API endpoint and parameters
+    api_url = "https://video-transcript-scraper.p.rapidapi.com/"
+    payload = {"video_url": video_url}
+    headers = {
+        'x-rapidapi-key': rapidapi_key,
+        'x-rapidapi-host': "video-transcript-scraper.p.rapidapi.com",
+        'Content-Type': "application/json"
+    }
+
+    try:
+        # Make the POST request to the Video Transcript API
+        response = requests.post(api_url, json=payload, headers=headers)
+        response.raise_for_status()  # Raise an exception for 4xx/5xx errors
+
+        # Parse the JSON response
+        data = response.json()
+
+        # Process the transcript (assuming a similar structure to ScrapingDog)
+        processed_transcript = []
+        if 'transcripts' in data:
+            for index, item in enumerate(data['transcripts']):
+                if 'text' in item:
+                    segment = {
+                        'id': index + 1,
+                        'text': item.get('text', '').strip(),
+                        'startTime': item.get('start', None),
+                        'endTime': None,
+                        'duration': item.get('duration', None)
+                    }
+                    # Calculate endTime if start and duration are provided
+                    if segment['startTime'] is not None and segment['duration'] is not None:
+                        segment['endTime'] = segment['startTime'] + segment['duration']
+                    if segment['text']:
+                        processed_transcript.append(segment)
+
+        if not processed_transcript:
+            logger.info("No transcript found for this video")
+            return jsonify({
+                'message': "No transcript found for this video",
+                'status': False
+            }), 404
+
+        logger.info(f"Processed {len(processed_transcript)} segments")
+        return jsonify({
+            'message': "Transcript fetched successfully",
+            'data': processed_transcript,
+            'status': True,
+            'totalSegments': len(processed_transcript)
+        }), 200
+
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"HTTP error fetching transcript: {str(e)}")
+        return jsonify({
+            'message': f"Failed to fetch transcript: {str(e)}",
+            'status': False
+        }), e.response.status_code
+
+    except requests.exceptions.JSONDecodeError:
+        logger.error(f"Failed to parse API response as JSON: {response.text}")
+        return jsonify({
+            'message': "Invalid API response format",
+            'status': False
+        }), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+        return jsonify({
+            'message': "An unexpected error occurred while fetching the transcript",
+            'status': False
+        }), 500
+    
+    
 
 @app.route('/transcript/<video_id>', methods=['GET', 'POST'])
 def get_transcript(video_id):
