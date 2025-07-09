@@ -264,7 +264,7 @@ def get_data(video_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
-@app.route('/transcript', methods=['GET'])
+@app.route('/url/transcript', methods=['GET'])
 def get_transcript():
     # Get the video URL from query parameters
     video_url = request.args.get('url')
