@@ -266,25 +266,30 @@ def get_data(video_id):
     
 @app.route('/url/transcript', methods=['GET', 'POST'])
 def get_transcript_by_url():
-    # Determine video_url based on request method
-    if request.method == 'GET':
-        video_url = request.args.get('url')
-        if not video_url:
-            return jsonify({
-                'message': "Video URL is required in query parameters",
-                'status': False
-            }), 400
-    elif request.method == 'POST':
+    if request.method == 'POST':
+        logger.info(f"Received POST request headers: {request.headers}")
+        logger.info(f"Request body: {request.get_data(as_text=True)}")
         if not request.is_json:
+            logger.error("Request is not JSON")
             return jsonify({
                 'message': "Request must be JSON",
                 'status': False
             }), 400
         data = request.get_json()
+        logger.info(f"Parsed JSON: {data}")
         video_url = data.get('video_url') if data else None
         if not video_url:
+            logger.error("No video_url in request body")
             return jsonify({
                 'message': "Video URL is required in request body",
+                'status': False
+            }), 400
+    else:  # GET
+        video_url = request.args.get('url')
+        if not video_url:
+            logger.error("No video_url in query parameters")
+            return jsonify({
+                'message': "Video URL is required in query parameters",
                 'status': False
             }), 400
 
@@ -293,6 +298,7 @@ def get_transcript_by_url():
     # Retrieve RapidAPI key from environment variables
     rapidapi_key = os.getenv('RAPIDAPI_KEY')
     if not rapidapi_key:
+        logger.error("RapidAPI key is not configured")
         return jsonify({
             'message': "RapidAPI key is not configured",
             'status': False
