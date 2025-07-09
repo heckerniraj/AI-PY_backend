@@ -316,6 +316,7 @@ def get_transcript_by_url():
     try:
         # Make the POST request to the Video Transcript API
         response = requests.post(api_url, json=payload, headers=headers)
+        logger.info(f"API response status: {response.status_code}, body: {response.text}")
         response.raise_for_status()  # Raise an exception for 4xx/5xx errors
 
         # Parse the JSON response
@@ -353,14 +354,16 @@ def get_transcript_by_url():
             'status': True,
             'totalSegments': len(processed_transcript)
         }), 200
+        
+        
 
     except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP error fetching transcript: {str(e)}")
+        logger.error(f"HTTP error fetching transcript: {str(e)}, response: {e.response.text}")
         return jsonify({
             'message': f"Failed to fetch transcript: {str(e)}",
             'status': False
         }), e.response.status_code
-
+    
     except requests.exceptions.JSONDecodeError:
         logger.error(f"Failed to parse API response as JSON: {response.text}")
         return jsonify({
