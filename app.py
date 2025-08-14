@@ -226,24 +226,103 @@ def get_data(video_id):
         if not video_id:
             return jsonify({"error": "No videoID provided"}), 400
 
-        api_url = f"https://ytstream-download-youtube-videos.p.rapidapi.com/dl?id={video_id}"
-        headers = {
-            'x-rapidapi-key': '6820d4d822msh502bdc3b993dbd2p1a24c6jsndfbf9f3bc90b',
-            'x-rapidapi-host': 'ytstream-download-youtube-videos.p.rapidapi.com'
-        }
+        # Try to get video data using new RapidAPI methods
+        download_url = None
+        api_source = None
+        
+        # First try social-media-video-downloader
+        try:
+            import http.client
+            import json
+            import urllib.parse
+            
+            youtube_url = f"https://youtu.be/{video_id}"
+            encoded_url = urllib.parse.quote(youtube_url, safe='')
+            
+            conn = http.client.HTTPSConnection("social-media-video-downloader.p.rapidapi.com")
+            
+            headers = {
+                'x-rapidapi-key': "ea31c81ebamsh1f3eeb9bc2fc23ep1f5398jsn676a2478bbd0",
+                'x-rapidapi-host': "social-media-video-downloader.p.rapidapi.com"
+            }
+            
+            endpoint = f"/smvd/get/youtube?url={encoded_url}"
+            conn.request("GET", endpoint, headers=headers)
+            
+            res = conn.getresponse()
+            data = res.read()
+            conn.close()
+            
+            if res.status == 200:
+                result = json.loads(data.decode("utf-8"))
+                
+                # Extract download URL from response
+                if isinstance(result, dict):
+                    if 'data' in result and isinstance(result['data'], dict):
+                        if 'video_url' in result['data']:
+                            download_url = result['data']['video_url']
+                        elif 'url' in result['data']:
+                            download_url = result['data']['url']
+                        elif 'download_url' in result['data']:
+                            download_url = result['data']['download_url']
+                    elif 'video_url' in result:
+                        download_url = result['video_url']
+                    elif 'url' in result:
+                        download_url = result['url']
+                    elif 'download_url' in result:
+                        download_url = result['download_url']
+                
+                if download_url:
+                    api_source = "social-media-video-downloader"
+        except Exception as e:
+            print(f"social-media-video-downloader failed: {str(e)}")
+        
+        # If first method failed, try youtube-media-downloader
+        if not download_url:
+            try:
+                conn = http.client.HTTPSConnection("youtube-media-downloader.p.rapidapi.com")
+                
+                headers = {
+                    'x-rapidapi-key': "ea31c81ebamsh1f3eeb9bc2fc23ep1f5398jsn676a2478bbd0",
+                    'x-rapidapi-host': "youtube-media-downloader.p.rapidapi.com"
+                }
+                
+                endpoint = f"/v2/video/details?videoId={video_id}&urlAccess=normal&videos=auto&audios=auto"
+                conn.request("GET", endpoint, headers=headers)
+                
+                res = conn.getresponse()
+                data = res.read()
+                conn.close()
+                
+                if res.status == 200:
+                    result = json.loads(data.decode("utf-8"))
+                    
+                    # Extract download URL from response
+                    if isinstance(result, dict):
+                        if 'videos' in result and isinstance(result['videos'], list) and len(result['videos']) > 0:
+                            for video in result['videos']:
+                                if isinstance(video, dict) and 'url' in video:
+                                    download_url = video['url']
+                                    break
+                        elif 'video_url' in result:
+                            download_url = result['video_url']
+                        elif 'url' in result:
+                            download_url = result['url']
+                        elif 'download_url' in result:
+                            download_url = result['download_url']
+                    
+                    if download_url:
+                        api_source = "youtube-media-downloader"
+            except Exception as e:
+                print(f"youtube-media-downloader failed: {str(e)}")
 
-        response = requests.get(api_url, headers=headers)
+        if not download_url:
+            return jsonify({"error": "Unable to get video download URL from any RapidAPI service"}), 400
+
+        download_link = f"wget '{download_url}' -O './Download/{video_id}.mp4'"
+
+        response = requests.get(download_url, stream=True)
         response.raise_for_status()
-        result = response.json()
-
-        adaptive_formats = result.get('adaptiveFormats', [])
-        if not adaptive_formats or not isinstance(adaptive_formats, list) or not adaptive_formats[0].get('url'):
-            return jsonify({"error": "Invalid or missing adaptiveFormats data"}), 400
-
-
-        download_link = f"wget '{adaptive_formats[0]['url']}' -O './Download/{video_id}.mp4'"
-
-        response = requests.get(adaptive_formats[0]['url'], stream=True)
 
         # Create Download directory if it doesn't exist
         os.makedirs("./Download", exist_ok=True)
@@ -253,12 +332,12 @@ def get_data(video_id):
                 if chunk:
                     f.write(chunk)
 
-
-        print("Video downloaded successfully!")
+        print(f"Video downloaded successfully using {api_source}!")
 
         return jsonify({
-            "downloadURL" : download_link,
-            "normalURL" : adaptive_formats[0]['url']
+            "downloadURL": download_link,
+            "normalURL": download_url,
+            "apiSource": api_source
         })
 
     except Exception as e:
@@ -1141,57 +1220,181 @@ def safe_ffmpeg_process(input_path, output_path, start_time, end_time):
     except Exception as e:
         raise Exception(f"FFmpeg error: {str(e)}")
 
-def download_via_rapidapi(video_id, input_path):
-    """Download video using RapidAPI with proxy support"""
+def download_via_rapidapi_social_media(video_id, input_path):
+    """Download video using social-media-video-downloader RapidAPI"""
     try:
-        api_url = f"https://ytstream-download-youtube-videos.p.rapidapi.com/dl?id={video_id}"
+        import http.client
+        import json
+        import urllib.parse
+        
+        # Create the YouTube URL
+        youtube_url = f"https://youtu.be/{video_id}"
+        encoded_url = urllib.parse.quote(youtube_url, safe='')
+        
+        conn = http.client.HTTPSConnection("social-media-video-downloader.p.rapidapi.com")
+        
         headers = {
-            'x-rapidapi-key': '6820d4d822msh502bdc3b993dbd2p1a24c6jsndfbf9f3bc90b',
-            'x-rapidapi-host': 'ytstream-download-youtube-videos.p.rapidapi.com',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+            'x-rapidapi-key': "ea31c81ebamsh1f3eeb9bc2fc23ep1f5398jsn676a2478bbd0",
+            'x-rapidapi-host': "social-media-video-downloader.p.rapidapi.com"
         }
+        
+        endpoint = f"/smvd/get/youtube?url={encoded_url}"
+        conn.request("GET", endpoint, headers=headers)
+        
+        res = conn.getresponse()
+        data = res.read()
+        conn.close()
+        
+        if res.status != 200:
+            raise Exception(f"API returned status {res.status}")
+        
+        result = json.loads(data.decode("utf-8"))
+        
+        # Extract download URL from response
+        download_url = None
+        
+        # Look for video URL in different possible locations in response
+        if isinstance(result, dict):
+            # Check common response structures
+            if 'data' in result and isinstance(result['data'], dict):
+                if 'video_url' in result['data']:
+                    download_url = result['data']['video_url']
+                elif 'url' in result['data']:
+                    download_url = result['data']['url']
+                elif 'download_url' in result['data']:
+                    download_url = result['data']['download_url']
+            elif 'video_url' in result:
+                download_url = result['video_url']
+            elif 'url' in result:
+                download_url = result['url']
+            elif 'download_url' in result:
+                download_url = result['download_url']
+        
+        if not download_url:
+            raise ValueError("No valid download URL found in social-media-video-downloader response")
+        
+        # Download the video
         proxy_url = get_random_proxy()
         proxies = {
             "http": proxy_url,
             "https": proxy_url
         }
-        response = requests.get(api_url, headers=headers, timeout=30, proxies=proxies)
-        response.raise_for_status()
-        result = response.json()
-
-        download_url = None
-        for fmt_list in [result.get('adaptiveFormats', []), result.get('formats', [])]:
-            for fmt in fmt_list:
-                if fmt.get('url'):
-                    download_url = fmt['url']
-                    print(f"Using RapidAPI format: {fmt.get('qualityLabel', 'unknown')}")
-                    break
-            if download_url:
-                break
-
-        if not download_url:
-            raise ValueError("No valid download URL found via RapidAPI")
-
+        
         download_headers = {
             'Referer': 'https://www.youtube.com/',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
         }
-
+        
         print(f"Downloading video to path: {input_path}")
         os.makedirs(os.path.dirname(input_path), exist_ok=True)
-
+        
         with requests.get(download_url, headers=download_headers, stream=True, timeout=90, proxies=proxies) as r:
             r.raise_for_status()
             with open(input_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
-
+        
         if os.path.getsize(input_path) < 1024:
             raise ValueError("Downloaded file is too small or empty")
+        
+        print(f"Successfully downloaded video using social-media-video-downloader API")
         return True
+        
     except Exception as e:
-        print(f"RapidAPI download failed: {str(e)}")
+        print(f"Social media video downloader API failed: {str(e)}")
         return False
+
+def download_via_rapidapi_youtube_media(video_id, input_path):
+    """Download video using youtube-media-downloader RapidAPI"""
+    try:
+        import http.client
+        import json
+        
+        conn = http.client.HTTPSConnection("youtube-media-downloader.p.rapidapi.com")
+        
+        headers = {
+            'x-rapidapi-key': "ea31c81ebamsh1f3eeb9bc2fc23ep1f5398jsn676a2478bbd0",
+            'x-rapidapi-host': "youtube-media-downloader.p.rapidapi.com"
+        }
+        
+        endpoint = f"/v2/video/details?videoId={video_id}&urlAccess=normal&videos=auto&audios=auto"
+        conn.request("GET", endpoint, headers=headers)
+        
+        res = conn.getresponse()
+        data = res.read()
+        conn.close()
+        
+        if res.status != 200:
+            raise Exception(f"API returned status {res.status}")
+        
+        result = json.loads(data.decode("utf-8"))
+        
+        # Extract download URL from response
+        download_url = None
+        
+        # Look for video URL in different possible locations in response
+        if isinstance(result, dict):
+            # Check for videos array/list
+            if 'videos' in result and isinstance(result['videos'], list) and len(result['videos']) > 0:
+                for video in result['videos']:
+                    if isinstance(video, dict) and 'url' in video:
+                        download_url = video['url']
+                        print(f"Using youtube-media-downloader format: {video.get('quality', 'unknown')}")
+                        break
+            # Check for direct URL fields
+            elif 'video_url' in result:
+                download_url = result['video_url']
+            elif 'url' in result:
+                download_url = result['url']
+            elif 'download_url' in result:
+                download_url = result['download_url']
+        
+        if not download_url:
+            raise ValueError("No valid download URL found in youtube-media-downloader response")
+        
+        # Download the video
+        proxy_url = get_random_proxy()
+        proxies = {
+            "http": proxy_url,
+            "https": proxy_url
+        }
+        
+        download_headers = {
+            'Referer': 'https://www.youtube.com/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        }
+        
+        print(f"Downloading video to path: {input_path}")
+        os.makedirs(os.path.dirname(input_path), exist_ok=True)
+        
+        with requests.get(download_url, headers=download_headers, stream=True, timeout=90, proxies=proxies) as r:
+            r.raise_for_status()
+            with open(input_path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        
+        if os.path.getsize(input_path) < 1024:
+            raise ValueError("Downloaded file is too small or empty")
+        
+        print(f"Successfully downloaded video using youtube-media-downloader API")
+        return True
+        
+    except Exception as e:
+        print(f"YouTube media downloader API failed: {str(e)}")
+        return False
+
+def download_via_rapidapi(video_id, input_path):
+    """Download video using new RapidAPI methods with fallback"""
+    # Try social-media-video-downloader first
+    if download_via_rapidapi_social_media(video_id, input_path):
+        return True
+    
+    # Fallback to youtube-media-downloader
+    if download_via_rapidapi_youtube_media(video_id, input_path):
+        return True
+    
+    print(f"All RapidAPI download methods failed for video {video_id}")
+    return False
 
 def download_via_ytdlp(video_id, input_path, use_cookies=True):
     """Download video using yt-dlp with enhanced options and proxy support"""
